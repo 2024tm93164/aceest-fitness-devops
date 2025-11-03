@@ -2,29 +2,31 @@ version: '3.7'
 services:
   # 1. Jenkins container with Docker access (dind configuration)
   jenkins:
-    # Changed image from 'lts' to a specific, stable version to improve startup reliability on Windows
+    # Stable image and explicit JDK version
     image: jenkins/jenkins:2.440-jdk17
-    user: root # Run as root to ensure volume permissions are handled
-    privileged: true # Required for Docker-in-Docker setup on the host's socket
+    user: root # Ensure volume permissions are handled
+    privileged: true # Required for Docker-in-Docker (dind) setup
     container_name: jenkins
     ports:
       - "8080:8080" # Host:Container
     volumes:
-      # SWITCHING BACK to a named volume to avoid Windows/WSL host path confusion.
+      # Named volume for persistent Jenkins data
       - jenkins_home:/var/jenkins_home
-      # Mount the Docker socket to allow Jenkins to build/run other containers
+      # Mount the Docker socket for running dynamic containers
       - /var/run/docker.sock:/var/run/docker.sock 
     environment:
-      # Use a higher memory limit to prevent out-of-memory exits on startup
+      # Memory limit to prevent OutOfMemory errors
       - JAVA_OPTS=-Xmx2048m
     
-    # --- FINAL RESOURCE OVERRIDE ---
+    # --- CRITICAL FIX: ENSURE AUTO-RESTART AFTER CRASH/SHUTDOWN ---
+    restart: always 
+    
+    # Resource guarantees for stable startup on Windows/WSL
     deploy:
       resources:
         limits:
-          memory: 4096m # Guarantee 4GB of RAM for Jenkins startup
+          memory: 4096m # Guarantee 4GB of RAM 
           cpus: '2.0'   # Guarantee 2 CPUs
-    # -----------------------------
 
   # 2. SonarQube Service
   sonarqube:
@@ -36,14 +38,15 @@ services:
       - sonarqube_data:/opt/sonarqube/data
       - sonarqube_logs:/opt/sonarqube/logs
     environment:
-      # Set PostgreSQL to use a small container pool, preventing startup issues
+      # PostgreSQL configuration details
       - SONARQUBE_JDBC_URL=jdbc:postgresql://postgres_db:5432/sonar
       - SONARQUBE_JDBC_USERNAME=sonar
       - SONARQUBE_JDBC_PASSWORD=sonar_password
     depends_on:
       - postgres_db # Wait for the database to be ready
+    restart: always # Ensure SonarQube also restarts
 
-  # 3. Dedicated Database for SonarQube (Recommended)
+  # 3. Dedicated Database for SonarQube
   postgres_db:
     image: postgres:13
     environment:
@@ -52,8 +55,9 @@ services:
       - POSTGRES_DB=sonar
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    restart: always # Ensure DB also restarts
+
 volumes:
-  # The named volume definition is back here
   jenkins_home:
   sonarqube_data:
   sonarqube_logs:

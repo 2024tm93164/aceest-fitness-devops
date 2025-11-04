@@ -40,15 +40,14 @@ pipeline {
         // --- Phase 2: Code Quality (SonarQube) ---
         stage('2. Code Quality Analysis') {
             steps {
-                script {
-                    echo "Starting SonarQube analysis for project: ${SONAR_PROJECT_KEY}"
-                    // 1. Use withCredentials to securely fetch the 'SonarQube-Server' token and store it in SONAR_AUTH_TOKEN
-                    withCredentials([string(credentialsId: 'SonarQube-Server', variable: 'SONAR_AUTH_TOKEN')]) {
-                        withSonarQubeEnv('SonarQube-Server') { // Matches the name in "Configure System"
-                            // 2. Pass the token to the scanner using -Dsonar.login
-                            // FIX: Using double quotes and Groovy interpolation for both variables ensures the secret is injected.
-                            sh "sonar-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.sources=. -Dsonar.login=${SONAR_AUTH_TOKEN}"
-                        }
+                echo "Starting SonarQube analysis for project: ${SONAR_PROJECT_KEY}"
+                // 1. Use withCredentials to securely fetch the 'SonarQube-Server' token and store it in SONAR_AUTH_TOKEN
+                withCredentials([string(credentialsId: 'SonarQube-Server', variable: 'SONAR_AUTH_TOKEN')]) {
+                    withSonarQubeEnv('SonarQube-Server') { // Matches the name in "Configure System"
+                        // 2. Pass the token to the scanner using -Dsonar.login
+                        // FIX: Using double backslash (\\$) ensures the $ is retained for the shell to resolve, 
+                        // bypassing the Groovy variable interpolation failure.
+                        sh "sonar-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.sources=. -Dsonar.login=\\$SONAR_AUTH_TOKEN"
                     }
                 }
             }
@@ -99,7 +98,7 @@ pipeline {
             }
         }
 
-        // --- Phase 7: Deploy to Kubernetes ---
+        // --- Phase 7: Deploy to Minikube ---
         stage('7. Deploy to Minikube') {
             steps {
                 echo "Deploying new image to Kubernetes..."

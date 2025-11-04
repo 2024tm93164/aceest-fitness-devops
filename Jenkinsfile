@@ -6,10 +6,11 @@
  * 1. Plugins: SonarQube Scanner, Docker Pipeline, Kubernetes CLI.
  * 2. Credentials:
  * - 'docker-hub-credentials': Your Docker Hub username/password (Secret Text).
+ * - 'SonarQube-Server': Your SonarQube generated API Token (Secret Text).
  * 3. Tools:
  * - SonarQube Scanner configured in "Global Tool Configuration".
  * 4. System Config:
- * - SonarQube server connection configured in "Configure System".
+ * - SonarQube server connection configured in "Configure System" (URL set to http://172.17.0.1:9000).
  */
 pipeline {
     // Run on any available Jenkins agent
@@ -41,9 +42,12 @@ pipeline {
             steps {
                 script {
                     echo "Starting SonarQube analysis for project: ${SONAR_PROJECT_KEY}"
-                    // Assumes a SonarQube scanner tool named 'SonarScanner' is configured in Jenkins
-                    withSonarQubeEnv('SonarQube-Server') { // Matches the name in "Configure System"
-                        sh "sonar-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.sources=."
+                    // 1. Use withCredentials to securely fetch the 'SonarQube-Server' token and store it in SONAR_AUTH_TOKEN
+                    withCredentials([string(credentialsId: 'SonarQube-Server', variable: 'SONAR_AUTH_TOKEN')]) {
+                        withSonarQubeEnv('SonarQube-Server') { // Matches the name in "Configure System"
+                            // 2. Pass the token to the scanner using -Dsonar.login
+                            sh "sonar-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.sources=. -Dsonar.login=${SONAR_AUTH_TOKEN}"
+                        }
                     }
                 }
             }
@@ -127,4 +131,3 @@ pipeline {
         }
     }
 }
-

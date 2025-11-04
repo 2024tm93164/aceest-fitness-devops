@@ -41,13 +41,11 @@ pipeline {
         stage('2. Code Quality Analysis') {
             steps {
                 echo "Starting SonarQube analysis for project: ${SONAR_PROJECT_KEY}"
-                // 1. Use withCredentials to securely fetch the 'SonarQube-Server' token and store it in SONAR_AUTH_TOKEN
-                withCredentials([string(credentialsId: 'SonarQube-Server', variable: 'SONAR_AUTH_TOKEN')]) {
+                // FIX: Renamed the variable to 'SONAR_TOKEN_VAR' to resolve the Groovy MissingPropertyException (scoping issue).
+                withCredentials([string(credentialsId: 'SonarQube-Server', variable: 'SONAR_TOKEN_VAR')]) {
                     withSonarQubeEnv('SonarQube-Server') { // Matches the name in "Configure System"
-                        // 2. Pass the token to the scanner using -Dsonar.login
-                        // FIX: Using double backslash (\\$) ensures the $ is retained for the shell to resolve, 
-                        // bypassing the Groovy variable interpolation failure.
-                        sh "sonar-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.sources=. -Dsonar.login=\\$SONAR_AUTH_TOKEN"
+                        // Pass the token using standard Groovy interpolation with the new variable name.
+                        sh "sonar-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.sources=. -Dsonar.login=${SONAR_TOKEN_VAR}"
                     }
                 }
             }

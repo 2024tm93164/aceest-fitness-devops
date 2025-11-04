@@ -10,7 +10,7 @@
  * 3. Tools:
  * - SonarQube Scanner configured in "Global Tool Configuration".
  * 4. System Config:
- * - SonarQube server connection configured in "Configure System" (URL set to http://localhost:9000).
+ * - SonarQube server connection configured in "Configure System" (URL set to http://sonarqube:9000).
  * NOTE: Inside Docker Compose, the actual working URL must be configured as http://sonarqube:9000.
  */
 pipeline {
@@ -45,8 +45,8 @@ pipeline {
                 // FIX: Renamed the variable to 'SONAR_TOKEN_VAR' to resolve the Groovy MissingPropertyException (scoping issue).
                 withCredentials([string(credentialsId: 'SonarQube-Server', variable: 'SONAR_TOKEN_VAR')]) {
                     withSonarQubeEnv('SonarQube-Server') { // Matches the name in "Configure System"
-                        // Pass the token using standard Groovy interpolation with the new variable name.
-                        sh "sonar-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.sources=. -Dsonar.login=${SONAR_TOKEN_VAR}"
+                        // SECURE FIX: Using $SONAR_TOKEN_VAR allows Jenkins to mask the secret, avoiding the security warning.
+                        sh "sonar-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.sources=. -Dsonar.login=\$SONAR_TOKEN_VAR"
                     }
                 }
             }
@@ -56,8 +56,8 @@ pipeline {
         stage('3. SonarQube Quality Gate') {
             steps {
                 echo 'Waiting for SonarQube analysis to complete...'
-                // Halts the pipeline if the SonarQube Quality Gate fails (e.g., new bugs, low coverage)
-                timeout(time: 5, unit: 'MINUTES') {
+                // Increased timeout to 10 minutes to allow SonarQube time to process the report.
+                timeout(time: 10, unit: 'MINUTES') { 
                     waitForQualityGate abortPipeline: true
                 }
                 echo 'SonarQube Quality Gate passed!'
@@ -127,6 +127,9 @@ pipeline {
         failure {
             echo 'Pipeline failed!'
             // Add failure notifications here
+        }
+        aborted {
+            echo 'Pipeline was aborted, likely due to a timeout.'
         }
     }
 }

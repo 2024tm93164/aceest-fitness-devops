@@ -72,8 +72,9 @@ pipeline {
         stage('4. Unit Testing (Pytest)') {
             steps {
                 echo 'Running unit tests with Pytest...'
-                // Run tests inside a temporary container for a clean environment
-                sh 'docker run --rm -v ${WORKSPACE}:/app -w /app python:3.9-slim sh -c "pip install -r requirements.txt && pytest"'
+                // FIX: Changed 'sh -c' to 'bash -c' and used triple quotes (''') to ensure proper shell escaping
+                // and command chaining inside the temporary Python container.
+                sh '''docker run --rm -v ${WORKSPACE}:/app -w /app python:3.9-slim bash -c "pip install -r requirements.txt && pytest"'''
             }
         }
 

@@ -63,15 +63,14 @@ pipeline {
             steps {
                 echo 'Running unit tests with Pytest...'
                 
-                // FINAL FIX: Use a stable and verbose bash command string to ensure the entire chained command 
-                // is executed by the container's shell. This avoids the unpredictable behavior of the '&&' operator 
-                // in the Jenkins Groovy shell context.
+                // DEBUG FIX: We are adding 'ls -l /app' and 'cat requirements.txt' to verify 
+                // volume mounting and file visibility/readability inside the container.
                 sh """
                     docker run --rm \
                         -v ${WORKSPACE}:/app \
                         -w /app \
                         python:3.9-slim \
-                        bash -c "pip install -r requirements.txt && pytest"
+                        bash -c "ls -l /app && cat requirements.txt && pip install -r requirements.txt && pytest"
                 """
             }
         }

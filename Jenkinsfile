@@ -72,9 +72,13 @@ pipeline {
         stage('4. Unit Testing (Pytest)') {
             steps {
                 echo 'Running unit tests with Pytest...'
-                // FIX: Switched to double quotes (") for Groovy interpolation and single quotes (') for inner shell grouping.
-                // This reliably passes the chained command ("pip install ... && pytest") to bash -c.
-                sh "docker run --rm -v ${WORKSPACE}:/app -w /app python:3.9-slim bash -c 'pip install -r requirements.txt && pytest'"
+                
+                // DEBUG STEP: List the contents of the mounted workspace to verify 'requirements.txt' is visible.
+                sh "docker run --rm -v ${WORKSPACE}:/app -w /app python:3.9-slim ls -l /app"
+                
+                // FIX: Use 'sh -c' (universal shell) and escaped double quotes to reliably pass the chained command 
+                // as a single argument to the container's shell, ensuring the '&&' operator works as intended.
+                sh "docker run --rm -v ${WORKSPACE}:/app -w /app python:3.9-slim sh -c \"pip install -r requirements.txt && pytest\""
             }
         }
 

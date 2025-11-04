@@ -46,8 +46,9 @@ pipeline {
                     withCredentials([string(credentialsId: 'SonarQube-Server', variable: 'SONAR_AUTH_TOKEN')]) {
                         withSonarQubeEnv('SonarQube-Server') { // Matches the name in "Configure System"
                             // 2. Pass the token to the scanner using -Dsonar.login
-                            // FIX: Removing the curly braces and using \$SONAR_AUTH_TOKEN reliably passes the secret to the shell.
-                            sh "sonar-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.sources=. -Dsonar.login=\$SONAR_AUTH_TOKEN"
+                            // FIX: Using single quotes and concatenation ensures Groovy interpolates SONAR_PROJECT_KEY 
+                            // but leaves $SONAR_AUTH_TOKEN alone for the shell to resolve.
+                            sh 'sonar-scanner -Dsonar.projectKey=' + SONAR_PROJECT_KEY + ' -Dsonar.sources=. -Dsonar.login=$SONAR_AUTH_TOKEN'
                         }
                     }
                 }

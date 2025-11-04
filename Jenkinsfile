@@ -61,17 +61,18 @@ pipeline {
         // --- Stage 4: Unit Testing (Pytest) ---
         stage('4. Unit Testing (Pytest)') {
             steps {
-                echo 'Running unit tests with Pytest...'
+                echo 'Building temporary test image and running Pytest to bypass volume mount issues...'
                 
-                // DEBUG FIX: We are adding 'ls -l /app' and 'cat requirements.txt' to verify 
-                // volume mounting and file visibility/readability inside the container.
-                sh """
-                    docker run --rm \
-                        -v ${WORKSPACE}:/app \
-                        -w /app \
-                        python:3.9-slim \
-                        bash -c "ls -l /app && cat requirements.txt && pip install -r requirements.txt && pytest"
-                """
+                // 1. Build a temporary image. This guarantees all files (code, tests, requirements) 
+                // are available inside the image at the WORKDIR (/usr/src/app).
+                sh "docker build -t aceest-test-runner:temp -f Dockerfile ."
+                
+                // 2. Run the tests inside the temporary image. We override the default CMD 
+                // to execute pytest using the Python executable path inside the image.
+                sh "docker run --rm aceest-test-runner:temp /usr/local/bin/python -m pytest"
+                
+                // 3. Clean up the temporary image immediately after testing
+                sh "docker rmi aceest-test-runner:temp"
             }
         }
 

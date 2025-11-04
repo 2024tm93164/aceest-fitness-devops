@@ -63,9 +63,16 @@ pipeline {
             steps {
                 echo 'Running unit tests with Pytest...'
                 
-                // FIX: Consolidated command with robust single quotes for reliable execution of the chain
-                // inside the temporary Docker container's shell.
-                sh "docker run --rm -v ${WORKSPACE}:/app -w /app python:3.9-slim sh -c 'pip install -r requirements.txt && pytest'"
+                // FINAL FIX: Use a stable and verbose bash command string to ensure the entire chained command 
+                // is executed by the container's shell. This avoids the unpredictable behavior of the '&&' operator 
+                // in the Jenkins Groovy shell context.
+                sh """
+                    docker run --rm \
+                        -v ${WORKSPACE}:/app \
+                        -w /app \
+                        python:3.9-slim \
+                        bash -c "pip install -r requirements.txt && pytest"
+                """
             }
         }
 

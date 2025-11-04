@@ -72,9 +72,9 @@ pipeline {
         stage('4. Unit Testing (Pytest)') {
             steps {
                 echo 'Running unit tests with Pytest...'
-                // FIX: Changed 'sh -c' to 'bash -c' and used triple quotes (''') to ensure proper shell escaping
-                // and command chaining inside the temporary Python container.
-                sh '''docker run --rm -v ${WORKSPACE}:/app -w /app python:3.9-slim bash -c "pip install -r requirements.txt && pytest"'''
+                // FIX: Switched to double quotes (") for Groovy interpolation and single quotes (') for inner shell grouping.
+                // This reliably passes the chained command ("pip install ... && pytest") to bash -c.
+                sh "docker run --rm -v ${WORKSPACE}:/app -w /app python:3.9-slim bash -c 'pip install -r requirements.txt && pytest'"
             }
         }
 

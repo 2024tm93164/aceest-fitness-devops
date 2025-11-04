@@ -56,8 +56,12 @@ pipeline {
         stage('3. SonarQube Quality Gate') {
             steps {
                 echo 'Waiting for SonarQube analysis to complete...'
-                // FIX: Increased timeout to 15 minutes to allow the SonarQube Compute Engine enough time to process the report.
-                timeout(time: 15, unit: 'MINUTES') { 
+                
+                // ADDED: Wait 30 seconds to ensure the analysis task is fully registered and starts processing
+                sleep 30
+                
+                // FIX: Increased timeout to 20 minutes for maximum stability
+                timeout(time: 20, unit: 'MINUTES') { 
                     waitForQualityGate abortPipeline: true
                 }
                 echo 'SonarQube Quality Gate passed!'

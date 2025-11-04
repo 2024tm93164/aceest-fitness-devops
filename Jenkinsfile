@@ -10,7 +10,8 @@
  * 3. Tools:
  * - SonarQube Scanner configured in "Global Tool Configuration".
  * 4. System Config:
- * - SonarQube server connection configured in "Configure System" (URL set to http://172.17.0.1:9000).
+ * - SonarQube server connection configured in "Configure System" (URL set to http://localhost:9000).
+ * NOTE: Inside Docker Compose, the actual working URL must be configured as http://sonarqube:9000.
  */
 pipeline {
     // Run on any available Jenkins agent

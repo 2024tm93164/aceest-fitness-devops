@@ -4,11 +4,14 @@
  * This pipeline orchestrates the CI/CD flow, including quality gates, testing,
  * image building, and deployment to Minikube.
  *
- * FIX: Added context setup commands in Stage 7 to resolve Minikube authentication errors.
+ * FIX: Removed 'minikube' context setup commands in Stage 7, as the 'minikube'
+ * executable was not found on the Jenkins agent. The stage now relies solely on
+ * 'kubectl' being available and properly configured to connect to Minikube.
  *
  * NOTE: This Jenkinsfile assumes the following are configured in Jenkins:
  * 1. Credentials: 'docker-hub-credentials' (Username/Password), 'SonarQube-Server' (Secret Text/API Token).
  * 2. SonarQube Server is configured in "Configure System" and named 'SonarQube-Server'.
+ * 3. The Jenkins agent running Stage 7 must have 'kubectl' installed and a valid Kubeconfig file configured.
  */
 pipeline {
     agent any
@@ -104,12 +107,7 @@ pipeline {
         // --- Stage 7: Deploy to Minikube ---
         stage('7. Deploy to Minikube') {
             steps {
-                // ADDED FIX: Explicitly set the Minikube context to ensure kubectl is authenticated.
-                echo "Ensuring Minikube context is active and authenticated..."
-                sh "minikube update-context"
-                sh "kubectl config use-context minikube"
-                // END FIX
-
+                // Removed minikube context commands as the tool was not found on the agent.
                 echo "Deploying new image to Kubernetes..."
                 sh "kubectl set image deployment/aceest-fitness-deployment aceest-fitness=${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
 
@@ -124,7 +122,8 @@ pipeline {
         always {
             echo 'Pipeline finished. Cleaning up workspace.'
             cleanWs()
-            sh 'docker logout'
+            // Logout from Docker Hub for security
+            sh 'docker logout' 
         }
         success {
             echo 'Deployment successful! 🎉'

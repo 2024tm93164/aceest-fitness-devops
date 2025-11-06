@@ -9,8 +9,9 @@ pipeline {
     
     // --- TOOL CONFIGURATION ---
     tools {
+        // FIX: Changed 'sonarQubeScanner' to the correct internal pipeline name 'sonarrunner'.
         // This name MUST exactly match the Name configured in Jenkins -> Global Tool Configuration.
-        sonarQubeScanner 'SonarScannerTool'
+        sonarrunner 'SonarScannerTool'
     }
 
     environment {

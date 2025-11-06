@@ -1,24 +1,26 @@
 /**
- * ACEest Fitness CI/CD Pipeline
+ * This Declarative Pipeline file orchestrates the entire CI/CD flow for the
+ * ACEest Fitness application, from testing to deployment on Kubernetes.
  *
- * This pipeline orchestrates the CI/CD flow, including quality gates, testing,
- * image building, and deployment to Minikube.
- *
- * FIX CONFIRMED: Removed 'minikube' context setup commands in Stage 7, as the 'minikube'
- * executable was not found on the Jenkins agent. The stage now relies solely on
- * 'kubectl' being available and properly configured to connect to Minikube.
- *
- * NOTE: This Jenkinsfile assumes the following are configured in Jenkins:
- * 1. Credentials: 'docker-hub-credentials' (Username/Password), 'SonarQube-Server' (Secret Text/API Token).
- * 2. SonarQube Server is configured in "Configure System" and named 'SonarQube-Server'.
- * 3. The Jenkins agent running Stage 7 must have 'kubectl' installed and a valid Kubeconfig file configured.
+ * Required Jenkins Configuration:
+ * 1. Plugins: SonarQube Scanner, Docker Pipeline, Kubernetes CLI.
+ * 2. Credentials:
+ * - 'docker-hub-credentials': Your Docker Hub username/password (Secret Text).
+ * - 'SonarQube-Server': Your SonarQube generated API Token (Secret Text).
+ * 3. Tools:
+ * - SonarQube Scanner configured in "Global Tool Configuration".
+ * 4. System Config:
+ * - SonarQube server connection configured in "Configure System" (URL set to http://sonarqube:9000).
+ * NOTE: Inside Docker Compose, the actual working URL must be configured as http://sonarqube:9000.
  */
 pipeline {
+    // Run on any available Jenkins agent
     agent any
 
+    // Environment variables used throughout the pipeline
     environment {
         // --- Configuration ---
-        // !! REPLACE 26kishorekumar with your actual Docker Hub username !!
+        // !! Replace <YOUR_DOCKERHUB_USERNAME> with your actual username !!
         DOCKER_IMAGE_NAME = "26kishorekumar/aceest-fitness"
         SONAR_PROJECT_KEY = "aceest-fitness"
         // --- End Configuration ---
@@ -27,35 +29,38 @@ pipeline {
     }
 
     stages {
-        // --- Stage 1: Checkout (Declarative is sufficient) ---
+        // --- Phase 1: Checkout ---
         stage('1. Checkout Code') {
             steps {
-                echo 'Source code checked out by Declarative Pipeline SCM block.'
-                // The actual 'checkout scm' runs automatically before the first stage.
+                echo 'Checking out source code from Git...'
+                // 'scm' automatically checks out from the repo linked to this pipeline job
+                checkout scm
             }
         }
 
-        // --- Stage 2: Code Quality (SonarQube) ---
+        // --- Phase 2: Code Quality (SonarQube) ---
         stage('2. Code Quality Analysis') {
             steps {
                 echo "Starting SonarQube analysis for project: ${SONAR_PROJECT_KEY}"
+                // FIX: Renamed the variable to 'SONAR_TOKEN_VAR' to resolve the Groovy MissingPropertyException (scoping issue).
                 withCredentials([string(credentialsId: 'SonarQube-Server', variable: 'SONAR_TOKEN_VAR')]) {
-                    withSonarQubeEnv('SonarQube-Server') {
-                        // Securely execute the scanner
+                    withSonarQubeEnv('SonarQube-Server') { // Matches the name in "Configure System"
+                        // SECURE FIX: Using $SONAR_TOKEN_VAR allows Jenkins to mask the secret, avoiding the security warning.
                         sh "sonar-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.sources=. -Dsonar.login=\$SONAR_TOKEN_VAR"
                     }
                 }
             }
         }
 
-        // --- Stage 3: Quality Gate Check (Fixed Timeout) ---
+        // --- Phase 3: Quality Gate ---
         stage('3. SonarQube Quality Gate') {
             steps {
                 echo 'Waiting for SonarQube analysis to complete...'
                 
-                // Add sleep buffer and increase timeout for compute engine reliability
+                // ADDED: Wait 30 seconds to ensure the analysis task is fully registered and starts processing
                 sleep 30
                 
+                // FIX: Increased timeout to 20 minutes for maximum stability
                 timeout(time: 20, unit: 'MINUTES') { 
                     waitForQualityGate abortPipeline: true
                 }
@@ -63,25 +68,16 @@ pipeline {
             }
         }
 
-        // --- Stage 4: Unit Testing (Pytest) ---
+        // --- Phase 4: Unit Testing ---
         stage('4. Unit Testing (Pytest)') {
             steps {
-                echo 'Building temporary test image and running Pytest to bypass volume mount issues...'
-                
-                // 1. Build a temporary image. This guarantees all files (code, tests, requirements) 
-                // are available inside the image at the WORKDIR (/usr/src/app).
-                sh "docker build -t aceest-test-runner:temp -f Dockerfile ."
-                
-                // 2. Run the tests inside the temporary image. We override the default CMD 
-                // to execute pytest using the Python executable path inside the image.
-                sh "docker run --rm aceest-test-runner:temp /usr/local/bin/python -m pytest"
-                
-                // 3. Clean up the temporary image immediately after testing
-                sh "docker rmi aceest-test-runner:temp"
+                echo 'Running unit tests with Pytest...'
+                // Run tests inside a temporary container for a clean environment
+                sh 'docker run --rm -v ${WORKSPACE}:/app -w /app python:3.9-slim sh -c "pip install -r requirements.txt && pytest"'
             }
         }
 
-        // --- Stage 5: Build Docker Image ---
+        // --- Phase 5: Build Docker Image ---
         stage('5. Build Container Image') {
             steps {
                 echo "Building Docker image: ${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
@@ -92,10 +88,11 @@ pipeline {
             }
         }
 
-        // --- Stage 6: Push to Registry ---
+        // --- Phase 6: Push to Registry ---
         stage('6. Push Image to Docker Hub') {
             steps {
                 echo "Pushing image to Docker Hub..."
+                // Uses the 'docker-hub-credentials' ID configured in Jenkins
                 withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', passwordVariable: 'DOCKER_PASS', usernameVariable: 'DOCKER_USER')]) {
                     sh "echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER} --password-stdin"
                     sh "docker push ${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
@@ -104,11 +101,12 @@ pipeline {
             }
         }
 
-        // --- Stage 7: Deploy to Minikube ---
+        // --- Phase 7: Deploy to Minikube ---
         stage('7. Deploy to Minikube') {
             steps {
-                // The required fix is already applied: relying on a pre-configured kubectl.
                 echo "Deploying new image to Kubernetes..."
+                // Ensures the Jenkins agent has kubectl configured to talk to your Minikube cluster
+                // This command triggers a zero-downtime Rolling Update
                 sh "kubectl set image deployment/aceest-fitness-deployment aceest-fitness=${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
 
                 echo "Waiting for deployment to stabilize..."
@@ -121,15 +119,18 @@ pipeline {
     post {
         always {
             echo 'Pipeline finished. Cleaning up workspace.'
+            // Clean up the Jenkins workspace
             cleanWs()
-            // Logout from Docker Hub for security
-            sh 'docker logout' 
+            // Log out of Docker
+            sh 'docker logout'
         }
         success {
-            echo 'Deployment successful! 🎉'
+            echo 'Deployment successful!'
+            // Add success notifications (e.g., Slack, Email) here
         }
         failure {
-            echo 'Pipeline failed! 😔'
+            echo 'Pipeline failed!'
+            // Add failure notifications here
         }
         aborted {
             echo 'Pipeline was aborted, likely due to a timeout.'

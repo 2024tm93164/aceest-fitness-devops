@@ -4,13 +4,14 @@
  * This pipeline orchestrates the CI/CD flow, including quality gates, testing,
  * image building, and deployment to Minikube.
  *
- * FIX APPLIED: Stage 7 now uses `withKubeConfig` to securely inject the Kubernetes
- * configuration (Kubeconfig secret file) into the environment, fixing the "Authentication required" error.
+ * FIX CONFIRMED: Removed 'minikube' context setup commands in Stage 7, as the 'minikube'
+ * executable was not found on the Jenkins agent. The stage now relies solely on
+ * 'kubectl' being available and properly configured to connect to Minikube.
  *
  * NOTE: This Jenkinsfile assumes the following are configured in Jenkins:
  * 1. Credentials: 'docker-hub-credentials' (Username/Password), 'SonarQube-Server' (Secret Text/API Token).
  * 2. SonarQube Server is configured in "Configure System" and named 'SonarQube-Server'.
- * 3. A Secret File credential named 'minikube-kubeconfig-file' containing your ~/.kube/config content is configured.
+ * 3. The Jenkins agent running Stage 7 must have 'kubectl' installed and a valid Kubeconfig file configured.
  */
 pipeline {
     agent any
@@ -20,11 +21,6 @@ pipeline {
         // !! REPLACE 26kishorekumar with your actual Docker Hub username !!
         DOCKER_IMAGE_NAME = "26kishorekumar/aceest-fitness"
         SONAR_PROJECT_KEY = "aceest-fitness"
-        
-        // **NEW/CRITICAL FIX VARIABLE**
-        // You MUST create a Jenkins Secret File credential containing your Minikube Kubeconfig
-        // and replace the ID below with its actual ID.
-        KUBECONFIG_CREDENTIAL_ID = "minikube-kubeconfig-file"
         // --- End Configuration ---
 
         IMAGE_TAG = "build-${env.BUILD_NUMBER}"
@@ -35,6 +31,7 @@ pipeline {
         stage('1. Checkout Code') {
             steps {
                 echo 'Source code checked out by Declarative Pipeline SCM block.'
+                // The actual 'checkout scm' runs automatically before the first stage.
             }
         }
 
@@ -71,10 +68,12 @@ pipeline {
             steps {
                 echo 'Building temporary test image and running Pytest to bypass volume mount issues...'
                 
-                // 1. Build a temporary image.
+                // 1. Build a temporary image. This guarantees all files (code, tests, requirements) 
+                // are available inside the image at the WORKDIR (/usr/src/app).
                 sh "docker build -t aceest-test-runner:temp -f Dockerfile ."
                 
-                // 2. Run the tests inside the temporary image.
+                // 2. Run the tests inside the temporary image. We override the default CMD 
+                // to execute pytest using the Python executable path inside the image.
                 sh "docker run --rm aceest-test-runner:temp /usr/local/bin/python -m pytest"
                 
                 // 3. Clean up the temporary image immediately after testing
@@ -105,19 +104,15 @@ pipeline {
             }
         }
 
-        // --- Stage 7: Deploy to Minikube (FIXED) ---
+        // --- Stage 7: Deploy to Minikube ---
         stage('7. Deploy to Minikube') {
             steps {
-                echo "Attempting deployment by injecting Kubeconfig credentials..."
-                
-                // **FIX:** Use withKubeConfig to inject the necessary KUBECONFIG environment variable.
-                withKubeConfig(credentialsId: "${KUBECONFIG_CREDENTIAL_ID}") {
-                    echo "Deploying new image to Kubernetes using tag: ${IMAGE_TAG}"
-                    sh "kubectl set image deployment/aceest-fitness-deployment aceest-fitness=${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
+                // The required fix is already applied: relying on a pre-configured kubectl.
+                echo "Deploying new image to Kubernetes..."
+                sh "kubectl set image deployment/aceest-fitness-deployment aceest-fitness=${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
 
-                    echo "Waiting for deployment to stabilize..."
-                    sh "kubectl rollout status deployment/aceest-fitness-deployment"
-                }
+                echo "Waiting for deployment to stabilize..."
+                sh "kubectl rollout status deployment/aceest-fitness-deployment"
             }
         }
     }

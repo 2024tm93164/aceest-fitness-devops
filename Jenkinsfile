@@ -4,7 +4,7 @@
  * This pipeline orchestrates the CI/CD flow, including quality gates, testing,
  * image building, and deployment to Minikube.
  *
- * FIX: Removed 'minikube' context setup commands in Stage 7, as the 'minikube'
+ * FIX CONFIRMED: Removed 'minikube' context setup commands in Stage 7, as the 'minikube'
  * executable was not found on the Jenkins agent. The stage now relies solely on
  * 'kubectl' being available and properly configured to connect to Minikube.
  *
@@ -18,7 +18,7 @@ pipeline {
 
     environment {
         // --- Configuration ---
-        // !! Replace 26kishorekumar with your actual Docker Hub username !!
+        // !! REPLACE 26kishorekumar with your actual Docker Hub username !!
         DOCKER_IMAGE_NAME = "26kishorekumar/aceest-fitness"
         SONAR_PROJECT_KEY = "aceest-fitness"
         // --- End Configuration ---
@@ -107,7 +107,7 @@ pipeline {
         // --- Stage 7: Deploy to Minikube ---
         stage('7. Deploy to Minikube') {
             steps {
-                // Removed minikube context commands as the tool was not found on the agent.
+                // The required fix is already applied: relying on a pre-configured kubectl.
                 echo "Deploying new image to Kubernetes..."
                 sh "kubectl set image deployment/aceest-fitness-deployment aceest-fitness=${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
 

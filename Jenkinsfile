@@ -9,9 +9,11 @@ pipeline {
     
     // --- TOOL CONFIGURATION ---
     tools {
-        // FIX: Changed 'sonarQubeScanner' to the correct internal pipeline name 'sonarrunner'.
+        // FINAL FIX: Changed to the most reliable declarative alias 'sonarRunnerInstallation', 
+        // derived directly from the full class name 'hudson.plugins.sonar.SonarRunnerInstallation' 
+        // listed in the error message's valid types.
         // This name MUST exactly match the Name configured in Jenkins -> Global Tool Configuration.
-        sonarrunner 'SonarScannerTool'
+        sonarRunnerInstallation 'SonarScannerTool'
     }
 
     environment {

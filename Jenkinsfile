@@ -5,7 +5,7 @@ pipeline {
     agent any
     
     tools {
-        // Using the explicit class path as required by your Jenkins environment
+        // Using the explicit class path that your environment requires
         'hudson.plugins.sonar.SonarRunnerInstallation' 'SonarScannerTool'
     }
     
@@ -31,7 +31,7 @@ pipeline {
 
         stage('2. Code Quality Analysis') {
             environment {
-                // FIX: Explicitly retrieve the installed tool's path to prevent 'not found' errors
+                // Explicitly retrieve the installed tool's path to prevent 'not found' errors
                 SONAR_SCANNER_HOME = tool 'SonarScannerTool'
             }
             steps {
@@ -47,10 +47,10 @@ pipeline {
         stage('3. SonarQube Quality Gate') {
             steps {
                 echo "Waiting for SonarQube analysis to complete..."
-                timeout(time: 10, unit: 'MINUTES') {
-                    // Wait for the Quality Gate result from SonarQube
-                    waitForQualityGate abortPipeline: true
-                }
+                // FIX: Removed the redundant 10-minute timeout wrapper.
+                // The waitForQualityGate step will now wait until the analysis is processed 
+                // by the SonarQube server and the quality gate status is available.
+                waitForQualityGate abortPipeline: true
                 echo "SonarQube Quality Gate passed!"
             }
         }
@@ -58,7 +58,7 @@ pipeline {
         stage('4. Unit Testing (Pytest)') {
             steps {
                 echo "Running Pytest inside a temporary container..."
-                // NOTE: This will fail if the agent cannot run 'docker'
+                // NOTE: This and subsequent Docker steps will fail if the agent cannot run 'docker'
                 sh "docker build -t aceest-test-runner:temp -f Dockerfile ."
                 // Running pytest command: python -m pytest
                 sh "docker run --rm aceest-test-runner:temp /usr/local/bin/python -m pytest" 
@@ -123,12 +123,12 @@ pipeline {
             cleanWs()
         }
         success {
-            echo "Logging out of Docker Hub."
+            echo "Logging out of Docker Hub. (If Docker is installed)"
             sh "docker logout"
             echo "Pipeline succeeded! 🎉"
         }
         failure {
-            echo "Logging out of Docker Hub."
+            echo "Logging out of Docker Hub. (If Docker is installed)"
             sh "docker logout"
             echo "Pipeline failed! 😔"
         }

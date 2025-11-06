@@ -4,10 +4,10 @@ pipeline {
     // Run on any available Jenkins agent
     agent any
     
-    // FIX 1: The 'tools' directive is REQUIRED to make 'sonar-scanner' available
+    // FIX 1: Changed 'sonarRunnerInstallation' to the correct keyword 'sonarRunner'
     tools {
         // This name MUST match the name configured in Manage Jenkins -> Global Tool Configuration
-        sonarRunnerInstallation 'SonarScannerTool'
+        sonarRunner 'SonarScannerTool'
     }
     
     // Define all necessary credentials and environment variables
@@ -100,7 +100,7 @@ pipeline {
             steps {
                 echo "Deploying new image (${IMAGE_TO_DEPLOY}) to Kubernetes..."
                 
-                // FIX 3: Inject the kubeconfig file securely and set the KUBECONFIG env var
+                // Inject the kubeconfig file securely and set the KUBECONFIG env var
                 withCredentials([file(credentialsId: env.KUBECONFIG_CREDENTIAL_ID, variable: 'KUBECONFIG_FILE_PATH')]) {
                     withEnv(["KUBECONFIG=${KUBECONFIG_FILE_PATH}"]) {
                         sh """

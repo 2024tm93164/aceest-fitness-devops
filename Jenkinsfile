@@ -4,10 +4,10 @@ pipeline {
     // Run on any available Jenkins agent
     agent any
     
-    // FIX 1: Changed 'sonarRunnerInstallation' to the correct keyword 'sonarRunner'
     tools {
-        // This name MUST match the name configured in Manage Jenkins -> Global Tool Configuration
-        sonarRunner 'SonarScannerTool'
+        // FIX 1: Changed the tool type to the full, explicit class path
+        // as required by your Jenkins environment when aliases fail.
+        'hudson.plugins.sonar.SonarRunnerInstallation' 'SonarScannerTool'
     }
     
     // Define all necessary credentials and environment variables

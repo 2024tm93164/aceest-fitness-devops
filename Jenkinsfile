@@ -1,139 +1,133 @@
-/**
- * This Declarative Pipeline file orchestrates the entire CI/CD flow for the
- * ACEest Fitness application, from testing to deployment on Kubernetes.
- *
- * Required Jenkins Configuration:
- * 1. Plugins: SonarQube Scanner, Docker Pipeline, Kubernetes CLI.
- * 2. Credentials:
- * - 'docker-hub-credentials': Your Docker Hub username/password (Secret Text).
- * - 'SonarQube-Server': Your SonarQube generated API Token (Secret Text).
- * 3. Tools:
- * - SonarQube Scanner configured in "Global Tool Configuration".
- * 4. System Config:
- * - SonarQube server connection configured in "Configure System" (URL set to http://sonarqube:9000).
- * NOTE: Inside Docker Compose, the actual working URL must be configured as http://sonarqube:9000.
- */
+def DOCKER_IMAGE_NAME = "26kishorekumar/aceest-fitness"
+
 pipeline {
     // Run on any available Jenkins agent
     agent any
-
-    // Environment variables used throughout the pipeline
+    
+    // FIX 1: The 'tools' directive is REQUIRED to make 'sonar-scanner' available
+    tools {
+        // This name MUST match the name configured in Manage Jenkins -> Global Tool Configuration
+        sonarRunnerInstallation 'SonarScannerTool'
+    }
+    
+    // Define all necessary credentials and environment variables
     environment {
-        // --- Configuration ---
-        // !! Replace <YOUR_DOCKERHUB_USERNAME> with your actual username !!
-        DOCKER_IMAGE_NAME = "26kishorekumar/aceest-fitness"
-        SONAR_PROJECT_KEY = "aceest-fitness"
-        // --- End Configuration ---
-
-        IMAGE_TAG = "build-${env.BUILD_NUMBER}"
+        // Credential IDs defined in Jenkins (Manage Credentials -> Global)
+        SONAR_TOKEN_VAR = credentials('SonarQube-Server') // Secret text containing the token
+        DOCKER_USER = '26kishorekumar'
+        DOCKER_PASS = credentials('docker-hub-credentials') // Username with password
+        
+        // This ID MUST match the Secret File credential uploaded to Jenkins
+        KUBECONFIG_CREDENTIAL_ID = 'MINIKUBE_KUBECONFIG' 
     }
 
     stages {
-        // --- Phase 1: Checkout ---
         stage('1. Checkout Code') {
             steps {
-                echo 'Checking out source code from Git...'
-                // 'scm' automatically checks out from the repo linked to this pipeline job
+                echo 'Source code checked out by Declarative Pipeline SCM block.'
+                // Explicit checkout for clarity, though SCM block does initial clone
                 checkout scm
             }
         }
 
-        // --- Phase 2: Code Quality (SonarQube) ---
         stage('2. Code Quality Analysis') {
             steps {
-                echo "Starting SonarQube analysis for project: ${SONAR_PROJECT_KEY}"
-                // FIX: Renamed the variable to 'SONAR_TOKEN_VAR' to resolve the Groovy MissingPropertyException (scoping issue).
-                withCredentials([string(credentialsId: 'SonarQube-Server', variable: 'SONAR_TOKEN_VAR')]) {
-                    withSonarQubeEnv('SonarQube-Server') { // Matches the name in "Configure System"
-                        // SECURE FIX: Using $SONAR_TOKEN_VAR allows Jenkins to mask the secret, avoiding the security warning.
-                        sh "sonar-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.sources=. -Dsonar.login=\$SONAR_TOKEN_VAR"
-                    }
+                echo "Starting SonarQube analysis for project: aceest-fitness"
+                // 'SonarQube-Server' matches the name set in Configure System
+                withSonarQubeEnv('SonarQube-Server') {
+                    // Use the securely loaded token credential
+                    sh "sonar-scanner -Dsonar.projectKey=aceest-fitness -Dsonar.sources=. -Dsonar.login=${SONAR_TOKEN_VAR}"
                 }
             }
         }
-
-        // --- Phase 3: Quality Gate ---
+        
         stage('3. SonarQube Quality Gate') {
             steps {
-                echo 'Waiting for SonarQube analysis to complete...'
-                
-                // ADDED: Wait 30 seconds to ensure the analysis task is fully registered and starts processing
-                sleep 30
-                
-                // FIX: Increased timeout to 20 minutes for maximum stability
-                timeout(time: 20, unit: 'MINUTES') { 
+                echo "Waiting for SonarQube analysis to complete..."
+                timeout(time: 10, unit: 'MINUTES') {
+                    // Wait for the Quality Gate result from SonarQube
                     waitForQualityGate abortPipeline: true
                 }
-                echo 'SonarQube Quality Gate passed!'
+                echo "SonarQube Quality Gate passed!"
             }
         }
 
-        // --- Phase 4: Unit Testing ---
         stage('4. Unit Testing (Pytest)') {
             steps {
-                echo 'Running unit tests with Pytest...'
-                // Run tests inside a temporary container for a clean environment
-                sh 'docker run --rm -v ${WORKSPACE}:/app -w /app python:3.9-slim sh -c "pip install -r requirements.txt && pytest"'
+                echo "Running Pytest inside a temporary container..."
+                // Build a temporary image and run tests inside it
+                sh "docker build -t aceest-test-runner:temp -f Dockerfile ."
+                // Running pytest command: python -m pytest
+                sh "docker run --rm aceest-test-runner:temp /usr/local/bin/python -m pytest" 
+                // Clean up the temporary image
+                sh "docker rmi aceest-test-runner:temp"
             }
         }
 
-        // --- Phase 5: Build Docker Image ---
         stage('5. Build Container Image') {
+            environment {
+                // Ensure a unique build number is used for tagging
+                IMAGE_TAG = "build-${BUILD_NUMBER}"
+            }
             steps {
                 echo "Building Docker image: ${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
                 sh "docker build -t ${DOCKER_IMAGE_NAME}:${IMAGE_TAG} ."
-
                 echo "Tagging image as 'latest'"
                 sh "docker tag ${DOCKER_IMAGE_NAME}:${IMAGE_TAG} ${DOCKER_IMAGE_NAME}:latest"
             }
         }
 
-        // --- Phase 6: Push to Registry ---
         stage('6. Push Image to Docker Hub') {
+            environment {
+                IMAGE_TAG = "build-${BUILD_NUMBER}"
+            }
             steps {
                 echo "Pushing image to Docker Hub..."
-                // Uses the 'docker-hub-credentials' ID configured in Jenkins
-                withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', passwordVariable: 'DOCKER_PASS', usernameVariable: 'DOCKER_USER')]) {
-                    sh "echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER} --password-stdin"
-                    sh "docker push ${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
-                    sh "docker push ${DOCKER_IMAGE_NAME}:latest"
-                }
+                // Use DOCKER_PASS for secure login
+                sh """
+                    echo "${DOCKER_PASS}" | docker login -u ${DOCKER_USER} --password-stdin
+                    docker push ${DOCKER_IMAGE_NAME}:${IMAGE_TAG}
+                    docker push ${DOCKER_IMAGE_NAME}:latest
+                """
             }
         }
 
-        // --- Phase 7: Deploy to Minikube ---
         stage('7. Deploy to Minikube') {
+            environment {
+                // Use the build number tag for deployment to ensure the correct image is pulled
+                IMAGE_TO_DEPLOY = "${DOCKER_IMAGE_NAME}:build-${BUILD_NUMBER}"
+            }
             steps {
-                echo "Deploying new image to Kubernetes..."
-                // Ensures the Jenkins agent has kubectl configured to talk to your Minikube cluster
-                // This command triggers a zero-downtime Rolling Update
-                sh "kubectl set image deployment/aceest-fitness-deployment aceest-fitness=${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
-
-                echo "Waiting for deployment to stabilize..."
-                sh "kubectl rollout status deployment/aceest-fitness-deployment"
+                echo "Deploying new image (${IMAGE_TO_DEPLOY}) to Kubernetes..."
+                
+                // FIX 3: Inject the kubeconfig file securely and set the KUBECONFIG env var
+                withCredentials([file(credentialsId: env.KUBECONFIG_CREDENTIAL_ID, variable: 'KUBECONFIG_FILE_PATH')]) {
+                    withEnv(["KUBECONFIG=${KUBECONFIG_FILE_PATH}"]) {
+                        sh """
+                            # This command uses the injected kubeconfig file path
+                            kubectl set image deployment/aceest-fitness-deployment aceest-fitness=${IMAGE_TO_DEPLOY}
+                        """
+                    }
+                }
+                echo "Deployment command sent to Kubernetes."
             }
         }
     }
-
-    // --- Post-Pipeline Actions ---
+    
     post {
         always {
-            echo 'Pipeline finished. Cleaning up workspace.'
-            // Clean up the Jenkins workspace
+            echo "Pipeline finished. Cleaning up workspace."
             cleanWs()
-            // Log out of Docker
-            sh 'docker logout'
         }
         success {
-            echo 'Deployment successful!'
-            // Add success notifications (e.g., Slack, Email) here
+            echo "Logging out of Docker Hub."
+            sh "docker logout"
+            echo "Pipeline succeeded! 🎉"
         }
         failure {
-            echo 'Pipeline failed!'
-            // Add failure notifications here
-        }
-        aborted {
-            echo 'Pipeline was aborted, likely due to a timeout.'
+            echo "Logging out of Docker Hub."
+            sh "docker logout"
+            echo "Pipeline failed! 😔"
         }
     }
 }

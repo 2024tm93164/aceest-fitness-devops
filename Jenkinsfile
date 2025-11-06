@@ -5,8 +5,7 @@ pipeline {
     agent any
     
     tools {
-        // FIX 1: Changed the tool type to the full, explicit class path
-        // as required by your Jenkins environment when aliases fail.
+        // Using the explicit class path as required by your Jenkins environment
         'hudson.plugins.sonar.SonarRunnerInstallation' 'SonarScannerTool'
     }
     
@@ -31,12 +30,16 @@ pipeline {
         }
 
         stage('2. Code Quality Analysis') {
+            environment {
+                // FIX: Explicitly retrieve the installed tool's path to prevent 'not found' errors
+                SONAR_SCANNER_HOME = tool 'SonarScannerTool'
+            }
             steps {
                 echo "Starting SonarQube analysis for project: aceest-fitness"
                 // 'SonarQube-Server' matches the name set in Configure System
                 withSonarQubeEnv('SonarQube-Server') {
-                    // Use the securely loaded token credential
-                    sh "sonar-scanner -Dsonar.projectKey=aceest-fitness -Dsonar.sources=. -Dsonar.login=${SONAR_TOKEN_VAR}"
+                    // Use the full, precise path to the executable
+                    sh "${SONAR_SCANNER_HOME}/bin/sonar-scanner -Dsonar.projectKey=aceest-fitness -Dsonar.sources=. -Dsonar.login=${SONAR_TOKEN_VAR}"
                 }
             }
         }
@@ -55,7 +58,7 @@ pipeline {
         stage('4. Unit Testing (Pytest)') {
             steps {
                 echo "Running Pytest inside a temporary container..."
-                // Build a temporary image and run tests inside it
+                // NOTE: This will fail if the agent cannot run 'docker'
                 sh "docker build -t aceest-test-runner:temp -f Dockerfile ."
                 // Running pytest command: python -m pytest
                 sh "docker run --rm aceest-test-runner:temp /usr/local/bin/python -m pytest" 

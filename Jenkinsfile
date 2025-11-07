@@ -67,13 +67,25 @@ pipeline {
             }
         }
 
-        // --- Phase 4: Unit Testing ---
+        // --- Phase 4: Unit Testing (FIXED: Using VENV for PEP 668 compliance) ---
         stage('4. Unit Testing (Pytest)') {
             steps {
-                echo 'Running unit tests with Pytest...'
-                // Runs tests inside a temporary Python container
-                // NOTE: This will require the 'docker' command to be available on the Jenkins agent.
-                sh 'docker run --rm -v ${WORKSPACE}:/app -w /app python:3.9-slim sh -c "pip install -r requirements.txt && pytest"'
+                echo 'Creating virtual environment, installing dependencies, and running unit tests.'
+                // CRITICAL FIX: Use venv to isolate dependencies and comply with "externally-managed-environment"
+                sh """
+                    # 1. Create a virtual environment named 'venv'
+                    /usr/bin/python3 -m venv venv
+                    
+                    # 2. Activate the environment (using the '.' source command)
+                    # This ensures subsequent commands use 'venv/bin/pip' and 'venv/bin/pytest'
+                    . venv/bin/activate
+                    
+                    echo "Installing dependencies inside virtual environment..."
+                    pip install -r requirements.txt
+                    
+                    echo "Running unit tests..."
+                    pytest
+                """
             }
         }
 

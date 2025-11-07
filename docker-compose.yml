@@ -1,21 +1,71 @@
- # --- MINIKUBE ACCESS MOUNTS (CRITICAL FOR KUBECTL) ---
-  # Mount the .kube folder (contains the config file)
-  # NOTE: Ensure 'Kishore Kumar' matches your actual Windows user name exactly.
-  - C:/Users/Kishore Kumar/.kube:/var/jenkins_home/.kube
-  # Mount the .minikube folder (contains the certificates/keys referenced in the config)
-  - C:/Users/Kishore Kumar/.minikube:/var/jenkins_home/.minikube
-  # ----------------------------------------------------
-  
-environment:
-  # Use a higher memory limit to prevent out-of-memory exits on startup
-  - JAVA_OPTS=-Xmx2048m
-  
-# Ensures the container restarts automatically upon failure or clean shutdown
-restart: always 
+version: '3.7'
+services:
+  # 1. Jenkins container with Docker access (dind configuration)
+  jenkins:
+    # UPDATED IMAGE to your current running version (2.534)
+    image: jenkins/jenkins:2.534-jdk17
+    user: root 
+    privileged: true 
+    container_name: jenkins
+    ports:
+      - "8080:8080" # Host:Container
+    volumes:
+      # Persistent volume for Jenkins data (keeps all configurations and plugins)
+      - jenkins_home:/var/jenkins_home
+      # Mount the Docker socket to allow Jenkins to build/run other containers
+      - /var/run/docker.sock:/var/run/docker.sock 
+      
+      # --- MINIKUBE ACCESS MOUNTS (CRITICAL FOR KUBECTL) ---
+      # Mount the .kube folder (contains the config file)
+      # NOTE: Ensure 'Kishore Kumar' matches your actual Windows user name exactly.
+      - C:/Users/Kishore Kumar/.kube:/var/jenkins_home/.kube
+      # Mount the .minikube folder (contains the certificates/keys referenced in the config)
+      - C:/Users/Kishore Kumar/.minikube:/var/jenkins_home/.minikube
+      # ----------------------------------------------------
+      
+    environment:
+      # Use a higher memory limit to prevent out-of-memory exits on startup
+      - JAVA_OPTS=-Xmx2048m
+    
+    # Ensures the container restarts automatically upon failure or clean shutdown
+    restart: always 
+    
+    # Guaranteed resource allocation
+    deploy:
+      resources:
+        limits:
+          memory: 4096m # Guarantee 4GB of RAM for Jenkins startup
+          cpus: '2.0'   # Guarantee 2 CPUs
 
-# Guaranteed resource allocation
-deploy:
-  resources:
-    limits:
-      memory: 4096m # Guarantee 4GB of RAM for Jenkins startup
-      cpus: '2.0'   # Guarantee 2 CPUs
+  # 2. SonarQube Service
+  sonarqube:
+    image: sonarqube:lts
+    container_name: sonarqube
+    ports:
+      - "9000:9000"
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_logs:/opt/sonarqube/logs
+    environment:
+      # Set PostgreSQL connection details
+      - SONARQUBE_JDBC_URL=jdbc:postgresql://postgres_db:5432/sonar
+      - SONARQUBE_JDBC_USERNAME=sonar
+      - SONARQUBE_JDBC_PASSWORD=sonar_password
+    depends_on:
+      - postgres_db # Wait for the database to be ready
+
+  # 3. Dedicated Database for SonarQube (Recommended)
+  postgres_db:
+    image: postgres:13
+    environment:
+      - POSTGRES_USER=sonar
+      - POSTGRES_PASSWORD=sonar_password
+      - POSTGRES_DB=sonar
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  jenkins_home:
+  sonarqube_data:
+  sonarqube_logs:
+  postgres_data:

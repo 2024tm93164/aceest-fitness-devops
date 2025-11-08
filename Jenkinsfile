@@ -113,7 +113,7 @@ pipeline {
             }
         }
 
-        // --- Phase 7: Deploy to Minikube ---
+        // --- Phase 7: Deploy to Minikube (FIXED: Added Docker Secret Creation) ---
         stage('7. Deploy to Minikube') {
             steps {
                 echo "Deploying new image to Kubernetes..."
@@ -121,10 +121,21 @@ pipeline {
                 // Securely inject the Kubeconfig file credential and set KUBECONFIG env var
                 withCredentials([file(credentialsId: env.KUBECONFIG_CREDENTIAL_ID, variable: 'KUBECONFIG_FILE_PATH')]) {
                     withEnv(["KUBECONFIG=${KUBECONFIG_FILE_PATH}"]) {
-                        // Rollout the new image tag
+                        
+                        // 1. CRITICAL FIX: Create/Update the Docker Hub Secret ('docker-hub-regcred')
+                        // This prevents the "error: EOF" by providing Kubernetes with the credentials needed for imagePullSecrets.
+                        echo "1. Creating/Updating Docker Hub registry secret ('docker-hub-regcred')..."
+                        withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', passwordVariable: 'DOCKER_PASS', usernameVariable: 'DOCKER_USER_VAR')]) {
+                            // Use dry-run=client -o yaml | kubectl apply -f - to create or update the secret idempotently
+                            sh "kubectl create secret docker-registry docker-hub-regcred --docker-server=docker.io --docker-username=${DOCKER_USER_VAR} --docker-password=${DOCKER_PASS} --dry-run=client -o yaml | kubectl apply -f -"
+                        }
+
+                        // 2. Rollout the new image tag
+                        echo "2. Applying new image tag via kubectl set image..."
                         sh "kubectl set image deployment/aceest-fitness-deployment aceest-fitness=${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
 
-                        echo "Waiting for deployment to stabilize..."
+                        // 3. Wait for stabilization
+                        echo "3. Waiting for deployment to stabilize..."
                         sh "kubectl rollout status deployment/aceest-fitness-deployment"
                     }
                 }

@@ -1,93 +1,152 @@
-# -----------------------------------------------------------
-# Part 1: Kubernetes Deployment
-# Manages the application pods, replicas, and Rolling Update strategy.
-# -----------------------------------------------------------
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: aceest-fitness-deployment
-  labels:
-    app: aceest-fitness
-spec:
-  # RollingUpdate is the default strategy, enabling zero-downtime updates
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1          # Clean integer value
-      maxUnavailable: 0    # Clean integer value - Requires all 3 replicas to be running before updating.
-  
-  replicas: 3 # Run 3 instances of the application for high availability
-  selector:
-    matchLabels:
-      app: aceest-fitness
-  template:
-    metadata:
-      labels:
-        app: aceest-fitness
-    spec:
-      containers:
-      - name: aceest-fitness
-        # NOTE: It is recommended to use version tags (e.g., :v1.0.0) instead of :latest
-        image: 26kishorekumar/aceest-fitness:latest 
-        # Added: Ensures the image is pulled on every deployment, useful during development
-        imagePullPolicy: Always 
-        ports:
-        - containerPort: 5000
+def DOCKER_IMAGE_NAME = "26kishorekumar/aceest-fitness"
+
+pipeline {
+    // Run on any available Jenkins agent
+    agent any
+    
+    // CRITICAL FIX: Explicitly define the SonarScanner tool using the full class path
+    // This is required by your specific Jenkins environment configuration to pass compilation.
+    tools {
+        'hudson.plugins.sonar.SonarRunnerInstallation' 'SonarScannerTool'
+    }
+
+    // Environment variables used throughout the pipeline
+    environment {
+        // --- Configuration ---
+        SONAR_PROJECT_KEY = "aceest-fitness"
+        DOCKER_USER = '26kishorekumar'
         
-        # Resource requests/limits (good practice for stability)
-        resources:
-          limits:
-            memory: "128Mi"
-            cpu: "500m"
-          requests:
-            memory: "64Mi"
-            cpu: "250m"
-
-        # Liveness Probe: Checks if the container is still running and healthy
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 5000
-          initialDelaySeconds: 15 # Increased delay to give the app time to start
-          periodSeconds: 10
-          timeoutSeconds: 3
-          failureThreshold: 5   # Increased: Allows 5 failed checks before restart
+        // This ID MUST match the Secret File credential uploaded to Jenkins
+        KUBECONFIG_CREDENTIAL_ID = 'MINIKUBE_KUBECONFIG' 
+        // --- End Configuration ---
         
-        # Readiness Probe: Checks if the container is ready to serve traffic
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 5000
-          initialDelaySeconds: 10 # Slightly longer delay
-          periodSeconds: 5
-          timeoutSeconds: 3
-          failureThreshold: 3 # Allows 3 failed checks before taking the pod out of service
+        IMAGE_TAG = "build-${env.BUILD_NUMBER}"
+    }
 
-      # --- NEW CRITICAL BLOCK ---
-      imagePullSecrets:
-      - name: docker-hub-regcred # Must match the secret name created in Jenkinsfile
-      # --------------------------
+    stages {
+        // --- Phase 1: Checkout ---
+        stage('1. Checkout Code') {
+            steps {
+                echo 'Checking out source code from Git...'
+                checkout scm
+            }
+        }
 
----
-# -----------------------------------------------------------
-# Part 2: Kubernetes Service
-# Exposes the Deployment to the network, necessary for Minikube access.
-# -----------------------------------------------------------
-apiVersion: v1
-kind: Service
-metadata:
-  name: aceest-fitness-service
-  labels:
-    app: aceest-fitness # Added label for consistency
-spec:
-  # The Service targets pods with the label 'app: aceest-fitness'
-  selector:
-    app: aceest-fitness
-  
-  # NodePort is ideal for Minikube, exposing the service on a port on the host machine
-  type: NodePort 
-  ports:
-    - protocol: TCP
-      port: 5000      # The service port for internal cluster access
-      targetPort: 5000 # The port your Flask app runs on (containerPort)
-      nodePort: 30080 # Specific port on the node (30000-32767 range)
+        // --- Phase 2: Code Quality (SonarQube) ---
+        stage('2. Code Quality Analysis') {
+            environment {
+                // CRITICAL FIX: Explicitly retrieve the installed tool's path to solve 'sonar-scanner: not found'
+                SONAR_SCANNER_HOME = tool 'SonarScannerTool'
+            }
+            steps {
+                echo "Starting SonarQube analysis for project: ${SONAR_PROJECT_KEY}"
+                
+                // Securely load SonarQube API token
+                withCredentials([string(credentialsId: 'SonarQube-Server', variable: 'SONAR_TOKEN_VAR')]) {
+                    withSonarQubeEnv('SonarQube-Server') {
+                        // Use the full, precise path to the executable
+                        sh "${SONAR_SCANNER_HOME}/bin/sonar-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.sources=. -Dsonar.login=\$SONAR_TOKEN_VAR"
+                    }
+                }
+            }
+        }
+
+        // --- Phase 3: Quality Gate ---
+        stage('3. SonarQube Quality Gate') {
+            steps {
+                echo 'Waiting for SonarQube analysis to complete...'
+                
+                // FIX for timeout: Wait 30 seconds to ensure the task is registered
+                sleep 30
+                
+                // FIX for timeout: Increased timeout limit to 20 minutes for stability
+                timeout(time: 20, unit: 'MINUTES') { 
+                    waitForQualityGate abortPipeline: true
+                }
+                echo 'SonarQube Quality Gate passed!'
+            }
+        }
+
+        // --- Phase 4: Unit Testing (FIXED: Using VENV for PEP 668 compliance) ---
+        stage('4. Unit Testing (Pytest)') {
+            steps {
+                echo 'Creating virtual environment, installing dependencies, and running unit tests.'
+                // CRITICAL FIX: Use venv to isolate dependencies and comply with "externally-managed-environment"
+                sh """
+                    # 1. Create a virtual environment named 'venv'
+                    /usr/bin/python3 -m venv venv
+                    
+                    # 2. Activate the environment (using the '.' source command)
+                    # This ensures subsequent commands use 'venv/bin/pip' and 'venv/bin/pytest'
+                    . venv/bin/activate
+                    
+                    echo "Installing dependencies inside virtual environment..."
+                    pip install -r requirements.txt
+                    
+                    echo "Running unit tests..."
+                    pytest
+                """
+            }
+        }
+
+        // --- Phase 5: Build Docker Image ---
+        stage('5. Build Container Image') {
+            steps {
+                echo "Building Docker image: ${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
+                sh "docker build -t ${DOCKER_IMAGE_NAME}:${IMAGE_TAG} ."
+
+                echo "Tagging image as 'latest'"
+                sh "docker tag ${DOCKER_IMAGE_NAME}:${IMAGE_TAG} ${DOCKER_IMAGE_NAME}:latest"
+            }
+        }
+
+        // --- Phase 6: Push to Registry ---
+        stage('6. Push Image to Docker Hub') {
+            steps {
+                echo "Pushing image to Docker Hub..."
+                // Securely load Docker Hub credentials
+                withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', passwordVariable: 'DOCKER_PASS', usernameVariable: 'DOCKER_USER_VAR')]) {
+                    sh "echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER_VAR} --password-stdin"
+                    sh "docker push ${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
+                    sh "docker push ${DOCKER_IMAGE_NAME}:latest"
+                }
+            }
+        }
+
+        // --- Phase 7: Deploy to Minikube ---
+        stage('7. Deploy to Minikube') {
+            steps {
+                echo "Deploying new image to Kubernetes..."
+                
+                // Securely inject the Kubeconfig file credential and set KUBECONFIG env var
+                withCredentials([file(credentialsId: env.KUBECONFIG_CREDENTIAL_ID, variable: 'KUBECONFIG_FILE_PATH')]) {
+                    withEnv(["KUBECONFIG=${KUBECONFIG_FILE_PATH}"]) {
+                        // Rollout the new image tag
+                        sh "kubectl set image deployment/aceest-fitness-deployment aceest-fitness=${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
+
+                        echo "Waiting for deployment to stabilize..."
+                        sh "kubectl rollout status deployment/aceest-fitness-deployment"
+                    }
+                }
+            }
+        }
+    }
+
+    // --- Post-Pipeline Actions ---
+    post {
+        always {
+            echo 'Pipeline finished. Cleaning up workspace.'
+            cleanWs()
+        }
+        success {
+            echo 'Logging out of Docker Hub.'
+            sh 'docker logout'
+            echo 'Deployment successful! 🎉'
+        }
+        failure {
+            echo 'Logging out of Docker Hub.'
+            sh 'docker logout'
+            echo 'Pipeline failed! 😔'
+        }
+    }
+}

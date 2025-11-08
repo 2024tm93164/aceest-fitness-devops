@@ -174,6 +174,6 @@ EOF_YAML
             echo 'Logging out of Docker Hub.'
             sh 'docker logout'
             echo 'Pipeline failed! 😔'
-        }
+        } 
     }
 }

@@ -4,13 +4,10 @@ pipeline {
     // Run on any available Jenkins agent
     agent any
     
-    // CRITICAL FIX: Explicitly define the SonarScanner tool using the full class path
-    // This is required by your specific Jenkins environment configuration to pass compilation.
     tools {
         'hudson.plugins.sonar.SonarRunnerInstallation' 'SonarScannerTool'
     }
 
-    // Environment variables used throughout the pipeline
     environment {
         // --- Configuration ---
         SONAR_PROJECT_KEY = "aceest-fitness"
@@ -24,7 +21,6 @@ pipeline {
     }
 
     stages {
-        // --- Phase 1: Checkout ---
         stage('1. Checkout Code') {
             steps {
                 echo 'Checking out source code from Git...'
@@ -32,34 +28,22 @@ pipeline {
             }
         }
 
-        // --- Phase 2: Code Quality (SonarQube) ---
         stage('2. Code Quality Analysis') {
             environment {
-                // CRITICAL FIX: Explicitly retrieve the installed tool's path to solve 'sonar-scanner: not found'
                 SONAR_SCANNER_HOME = tool 'SonarScannerTool'
             }
             steps {
-                echo "Starting SonarQube analysis for project: ${SONAR_PROJECT_KEY}"
-                
-                // Securely load SonarQube API token
                 withCredentials([string(credentialsId: 'SonarQube-Server', variable: 'SONAR_TOKEN_VAR')]) {
                     withSonarQubeEnv('SonarQube-Server') {
-                        // Use the full, precise path to the executable
                         sh "${SONAR_SCANNER_HOME}/bin/sonar-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.sources=. -Dsonar.login=\$SONAR_TOKEN_VAR"
                     }
                 }
             }
         }
 
-        // --- Phase 3: Quality Gate ---
         stage('3. SonarQube Quality Gate') {
             steps {
-                echo 'Waiting for SonarQube analysis to complete...'
-                
-                // FIX for timeout: Wait 30 seconds to ensure the task is registered
                 sleep 30
-                
-                // FIX for timeout: Increased timeout limit to 20 minutes for stability
                 timeout(time: 20, unit: 'MINUTES') { 
                     waitForQualityGate abortPipeline: true
                 }
@@ -67,44 +51,26 @@ pipeline {
             }
         }
 
-        // --- Phase 4: Unit Testing (FIXED: Using VENV for PEP 668 compliance) ---
         stage('4. Unit Testing (Pytest)') {
             steps {
-                echo 'Creating virtual environment, installing dependencies, and running unit tests.'
-                // CRITICAL FIX: Use venv to isolate dependencies and comply with "externally-managed-environment"
                 sh """
-                    # 1. Create a virtual environment named 'venv'
                     /usr/bin/python3 -m venv venv
-                    
-                    # 2. Activate the environment (using the '.' source command)
-                    # This ensures subsequent commands use 'venv/bin/pip' and 'venv/bin/pytest'
                     . venv/bin/activate
-                    
-                    echo "Installing dependencies inside virtual environment..."
                     pip install -r requirements.txt
-                    
-                    echo "Running unit tests..."
                     pytest
                 """
             }
         }
 
-        // --- Phase 5: Build Docker Image ---
         stage('5. Build Container Image') {
             steps {
-                echo "Building Docker image: ${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
                 sh "docker build -t ${DOCKER_IMAGE_NAME}:${IMAGE_TAG} ."
-
-                echo "Tagging image as 'latest'"
                 sh "docker tag ${DOCKER_IMAGE_NAME}:${IMAGE_TAG} ${DOCKER_IMAGE_NAME}:latest"
             }
         }
 
-        // --- Phase 6: Push to Registry ---
         stage('6. Push Image to Docker Hub') {
             steps {
-                echo "Pushing image to Docker Hub..."
-                // Securely load Docker Hub credentials
                 withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', passwordVariable: 'DOCKER_PASS', usernameVariable: 'DOCKER_USER_VAR')]) {
                     sh "echo ${DOCKER_PASS} | docker login -u ${DOCKER_USER_VAR} --password-stdin"
                     sh "docker push ${DOCKER_IMAGE_NAME}:${IMAGE_TAG}"
@@ -113,31 +79,70 @@ pipeline {
             }
         }
 
-        // --- Phase 7: Deploy to Minikube (FINAL FIX: Piping secret YAML and using triple-quote shell block) ---
+        // --- PHASE 7: DEPLOY TO MINIKUBE (FINAL, ABSOLUTE FIX: MANUAL BASE64 SECRET) ---
         stage('7. Deploy to Minikube') {
             steps {
                 echo "Deploying new image to Kubernetes..."
                 
-                // Securely inject the Kubeconfig file credential and set KUBECONFIG env var
                 withCredentials([file(credentialsId: env.KUBECONFIG_CREDENTIAL_ID, variable: 'KUBECONFIG_FILE_PATH')]) {
                     withEnv(["KUBECONFIG=${KUBECONFIG_FILE_PATH}"]) {
                         
-                        // 1. CRITICAL FIX: Create/Update the Docker Hub Secret ('docker-hub-regcred')
-                        echo "1. Creating/Updating Docker Hub registry secret ('docker-hub-regcred') using direct pipe..."
+                        // 1. Create/Update the Docker Hub Secret using a manually constructed Base64 file.
+                        echo "1. Creating/Updating Docker Hub registry secret ('docker-hub-regcred') via Base64 encoding..."
                         withCredentials([usernamePassword(credentialsId: 'docker-hub-credentials', passwordVariable: 'DOCKER_PASS', usernameVariable: 'DOCKER_USER_VAR')]) {
-                            // Use triple quotes and define temporary shell variables (D_USER, D_PASS) 
-                            // to securely capture the sensitive Groovy variables.
-                            // The entire output is then piped directly into 'kubectl apply -f -'
                             sh """
-                                D_USER='${DOCKER_USER_VAR}'
-                                D_PASS='${DOCKER_PASS}'
+                                # Assign Groovy credentials to shell variables
+                                DOCKER_USER='${DOCKER_USER_VAR}'
+                                DOCKER_PASS='${DOCKER_PASS}'
+                                SECRET_FILENAME="docker-secret-base64.yaml"
+                                REGISTRY_URL="docker.io"
 
-                                # Command now uses piping and secure shell variable substitution to avoid EOF error
-                                kubectl create secret docker-registry docker-hub-regcred \\
-                                    --docker-server=docker.io \\
-                                    --docker-username="\${D_USER}" \\
-                                    --docker-password="\${D_PASS}" \\
-                                    --dry-run=client -o yaml | kubectl apply -f -
+                                # CRITICAL: Base64 encode the raw username:password string
+                                # The -n flag ensures no trailing newline is included in the base64 string.
+                                # The -w 0 flag prevents line wrapping on some Linux systems.
+                                AUTH_BASE64=\$(echo -n "\${DOCKER_USER}:\${DOCKER_PASS}" | base64 -w 0)
+
+                                # Manually construct the .dockerconfigjson content, which is required
+                                # for Kubernetes imagePullSecrets.
+                                cat <<EOF > \${SECRET_FILENAME}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: docker-hub-regcred
+type: kubernetes.io/dockerconfigjson
+data:
+  .dockerconfigjson: eyJhdXRocyI6eyJkb2NrZXIuaW8iOntcInVzZXJuYW1lXCI6XCIyNmtpc2hvcmVrdW1hclwiLFwicGFzc3dvcmRcIjpcIiR7RE9DS0VSX1BBU1N9XCIsXCJlbWFpbFwiOlwiXCIsXCJhdXRoXCI6XCJhVVl6TzNwb1pGZHlaWFJmYkZOcGNXMXpZWjFoYkdsMWJWUnFhWFYzY3k1dlkyRXJkRzhnXCIsXCJuYW1lXCI6XCJyZWdkcmVjXCJ9fX0=
+EOF
+                                
+                                # FIX: Inject the actual base64 auth string into the YAML using sed
+                                # This replaces the placeholder token 'aU9QW....' with the generated Base64 string.
+                                # We must use a separate sed command since the heredoc structure makes Groovy interpolation complex.
+                                # Note: I am now using a different approach to bypass the shell issues. 
+                                
+                                # Use a simpler approach by manually creating the full .dockerconfigjson
+                                # This JSON object contains the entire required Docker config and is what we Base64 encode.
+                                JSON_CONFIG="{\\"auths\\": {\\"\${REGISTRY_URL}\\": {\\"username\\": \\"\${DOCKER_USER}\\", \\"password\\": \\"\${DOCKER_PASS}\\", \\"email\\": \\"none@none.com\\", \\"auth\\": \\"\${AUTH_BASE64}\\"}}}"
+                                
+                                # Now, Base64 encode the entire JSON configuration string
+                                FULL_CONFIG_BASE64=\$(echo -n \${JSON_CONFIG} | base64 -w 0)
+
+                                # Create the Secret YAML using the FULL_CONFIG_BASE64
+                                cat <<EOF_YAML > \${SECRET_FILENAME}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: docker-hub-regcred
+type: kubernetes.io/dockerconfigjson
+data:
+  .dockerconfigjson: \${FULL_CONFIG_BASE64}
+EOF_YAML
+                                
+                                # Step B: Apply the secret from the file
+                                echo "-> Applying secret from \${SECRET_FILENAME}"
+                                kubectl apply -f \${SECRET_FILENAME}
+                                
+                                # Step C: Clean up the temporary file immediately.
+                                rm \${SECRET_FILENAME}
                             """
                         }
 

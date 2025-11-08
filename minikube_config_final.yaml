@@ -7,7 +7,6 @@ clusters:
         provider: minikube.sigs.k8s.io
         version: v1.17.1
       name: cluster_info
-    # CRITICAL: The corrected port is here!
     server: https://host.docker.internal:60779 
     insecure-skip-tls-verify: true 
   name: minikube
@@ -28,4 +27,4 @@ kind: Config
 preferences: {}
 users:
 - name: minikube
-  user: {} # We leave this empty because Jenkins uses insecure-skip-tls-verify=true
+  user: {}

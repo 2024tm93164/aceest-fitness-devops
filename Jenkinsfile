@@ -13,7 +13,7 @@ pipeline {
         SONAR_PROJECT_KEY = "aceest-fitness"
         DOCKER_USER = '26kishorekumar'
         
-        // This ID MUST match the Secret File credential uploaded to Jenkins
+
         KUBECONFIG_CREDENTIAL_ID = 'MINIKUBE_KUBECONFIG' 
         // --- End Configuration ---
         

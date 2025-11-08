@@ -29,12 +29,10 @@ spec:
       - name: aceest-fitness
         # NOTE: It is recommended to use version tags (e.g., :v1.0.0) instead of :latest
         image: 26kishorekumar/aceest-fitness:latest 
-        # Added: Ensures the image is pulled on every deployment, useful during development
         imagePullPolicy: Always 
         ports:
         - containerPort: 5000
         
-        # Resource requests/limits (good practice for stability)
         resources:
           limits:
             memory: "128Mi"
